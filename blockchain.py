@@ -42,43 +42,52 @@ class Block:
 class Blockchain:
     def __init__(self):
         self.chain = [self.create_genesis_block()]
-        self.pending_transactions = []
 
     def create_genesis_block(self):
-        constitution = {
-            "title": "B L O C K C H A T --- G A N G",
-            "preamble": "A simple blockchain based chat application. Decentralized, communal, cool as fuck.",
-            "articles": [
-                "Origin Users: These are the original users of the blockchain. They are the first users to join the network.",
-                "Rule 1: Example",
-                "Rule 2: I'll think of it later.",
-                "Rule 3: voting is the only way to mint new members."
-            ]
-        }
-        return Block(0, time.time(), constitution, "0")
+        genesis_block = Block(
+            index=0,
+            timestamp=0,
+            data={
+                'title': 'B L O C K C H A T --- G A N G',
+                'preamble': 'A simple blockchain based chat application. Decentralized, communal, cool as fuck.',
+                'articles': [
+                    'Origin Users: These are the original users of the blockchain. They are the first users to join the network.',
+                    'Rule 1: Example',
+                    'Rule 2: I\'ll think of it later.',
+                    'Rule 3: voting is the only way to mint new members.'
+                ]
+            },
+            previous_hash='0'
+        )
+        genesis_block.hash = genesis_block.calculate_hash()
+        return genesis_block
 
     def get_latest_block(self):
         return self.chain[-1]
 
-    def add_block(self, data):
-        if isinstance(data, Block):
-            new_block = data
+    def add_block(self, block):
+        print(f"\033[94mAdding block with index: {block.index}\033[0m")
+        if self.is_valid_new_block(block, self.chain[-1]):
+            self.chain.append(block)
+            return True
         else:
-            previous_block = self.get_latest_block()
-            new_block = Block(previous_block.index + 1, time.time(), data, previous_block.hash)
-        
-        if self.is_block_valid(new_block, self.get_latest_block()):
-            self.chain.append(new_block)
-            return new_block
-        return None
+            print(f"\033[91mBlock with index {block.index} is invalid\033[0m")
+            return False
 
-    def is_block_valid(self, new_block, previous_block):
+    def is_valid_new_block(self, new_block, previous_block):
         if previous_block.index + 1 != new_block.index:
+            print(f"\033[91mInvalid index: {new_block.index}\033[0m")
             return False
         if previous_block.hash != new_block.previous_hash:
+            print(f"\033[91mInvalid previous hash: {new_block.previous_hash}\033[0m")
             return False
-        if new_block.calculate_hash() != new_block.hash:
+        if not self.is_valid_hash(new_block):
+            print(f"\033[91mInvalid hash: {new_block.hash}\033[0m")
             return False
+        return True
+
+    def is_valid_hash(self, block):
+        # Implement your hash validation logic here
         return True
 
     def is_chain_valid(self):
@@ -108,10 +117,10 @@ class Blockchain:
         return True
 
     def to_dict(self):
-        return {'chain': [block.to_dict() for block in self.chain]}
+        return [block.to_dict() for block in self.chain]
 
-    def from_dict(self, blockchain_dict):
-        self.chain = [Block.from_dict(block_dict) for block_dict in blockchain_dict['chain']]
+    def from_dict(self, data):
+        self.chain = [Block.from_dict(block_data) for block_data in data]
 
     def resolve_fork(self, incoming_chain):
         if len(incoming_chain) > len(self.chain):
