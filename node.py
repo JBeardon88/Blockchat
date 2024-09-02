@@ -11,6 +11,7 @@ from commands import handle_command
 from config import KNOWN_PEERS, SYNC_INTERVAL
 from network import send_to_peer, receive_from_peer, recvall, get_peer_addr
 
+
 class Node:
     def __init__(self, host, port, username):
         self.host = host
@@ -298,6 +299,15 @@ class Node:
         genesis_block = self.blockchain.chain[0]
         constitution = genesis_block.data
         display_constitution(constitution)
+
+    def display_blockchain(self):
+        for block in self.blockchain.chain:
+            print(f"Block {block.index}:")
+            print(f"  Timestamp: {time.ctime(block.timestamp)}")
+            print(f"  Previous Hash: {block.previous_hash}")
+            print(f"  Hash: {block.hash}")
+            print(f"  Data: {json.dumps(block.data, indent=4)}")
+            print("-" * 40)
 
 if __name__ == "__main__":
     import sys

@@ -13,7 +13,7 @@ def handle_command(command, node):
     elif command == '/list':
         node.list_peers()
     elif command == '/blockchain':
-        node.display_latest_block()
+        node.display_blockchain()
     elif command == '/history':
         node.display_chat_history()
     elif command == '/save':
