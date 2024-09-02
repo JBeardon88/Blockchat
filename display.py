@@ -1,5 +1,6 @@
 import time
 import json 
+from encryption import decrypt_message
 
 def display_help():
     print("\033[93mAvailable commands:\033[0m")
@@ -23,11 +24,15 @@ def display_chat_history(chat_history):
 def display_new_block(latest_block):
     if not latest_block:
         return
+    try:
+        decrypted_data = decrypt_message(latest_block.data)
+    except Exception as e:
+        decrypted_data = f"Error decrypting data: {e}"
     block_info = (
         f"\n\033[93m--- New Block Added ---\033[0m\n"
         f"Index: \033[96m{latest_block.index}\033[0m\n"
         f"Timestamp: \033[96m{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(latest_block.timestamp))}\033[0m\n"
-        f"Data: \033[96m{json.dumps(latest_block.data)}\033[0m\n"
+        f"Data: \033[96m{decrypted_data}\033[0m\n"
         f"Hash: \033[96m{latest_block.hash}\033[0m\n"
         f"Previous Hash: \033[96m{latest_block.previous_hash}\033[0m\n"
         f"--------------------\n"
@@ -38,11 +43,15 @@ def display_latest_block(latest_block):
     if not latest_block:
         print("\033[91mNo blocks in the chain yet.\033[0m")
     else:
+        try:
+            decrypted_data = decrypt_message(latest_block.data)
+        except Exception as e:
+            decrypted_data = f"Error decrypting data: {e}"
         block_info = (
             f"\n\033[93m--- Latest Block ---\033[0m\n"
             f"Index: \033[96m{latest_block.index}\033[0m\n"
             f"Timestamp: \033[96m{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(latest_block.timestamp))}\033[0m\n"
-            f"Data: \033[96m{json.dumps(latest_block.data)}\033[0m\n"
+            f"Data: \033[96m{decrypted_data}\033[0m\n"
             f"Hash: \033[96m{latest_block.hash}\033[0m\n"
             f"Previous Hash: \033[96m{latest_block.previous_hash}\033[0m\n"
             f"--------------------\n"

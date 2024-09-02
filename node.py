@@ -10,6 +10,7 @@ from display import display_help, display_chat_history, display_new_block, displ
 from commands import handle_command
 from config import KNOWN_PEERS, SYNC_INTERVAL
 from network import send_to_peer, receive_from_peer, recvall, get_peer_addr
+from encryption import encrypt_message, decrypt_message
 
 
 class Node:
@@ -197,7 +198,7 @@ class Node:
             self.request_full_blockchain()
 
     def sync_chat_history(self):
-        self.chat_history = [block.data for block in self.blockchain.chain if isinstance(block.data, dict) and 'content' in block.data]
+        self.chat_history = [json.loads(decrypt_message(block.data)) for block in self.blockchain.chain if isinstance(block.data, str)]
         self.update_display()
 
     def handle_user_input(self):
@@ -218,10 +219,11 @@ class Node:
                 self.shutdown()
 
     def add_to_blockchain(self, data):
+        encrypted_data = encrypt_message(json.dumps(data))
         new_block = Block(
             index=len(self.blockchain.chain),
             timestamp=time.time(),
-            data=data,
+            data=encrypted_data,
             previous_hash=self.blockchain.get_latest_block().hash
         )
         if self.blockchain.add_block(new_block):
