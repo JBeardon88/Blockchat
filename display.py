@@ -21,11 +21,11 @@ def display_chat_history(chat_history):
             print(f"\033[94m{msg['username']}\033[0m: {msg['content']}")
     print("--------------------")
 
-def display_new_block(latest_block):
+def display_new_block(latest_block, symmetric_key):
     if not latest_block:
         return
     try:
-        decrypted_data = decrypt_message(latest_block.data)
+        decrypted_data = decrypt_message(latest_block.data, symmetric_key)
     except Exception as e:
         decrypted_data = f"Error decrypting data: {e}"
     block_info = (
@@ -39,12 +39,12 @@ def display_new_block(latest_block):
     )
     print(block_info)
 
-def display_latest_block(latest_block):
+def display_latest_block(latest_block, symmetric_key):
     if not latest_block:
         print("\033[91mNo blocks in the chain yet.\033[0m")
     else:
         try:
-            decrypted_data = decrypt_message(latest_block.data)
+            decrypted_data = decrypt_message(latest_block.data, symmetric_key)
         except Exception as e:
             decrypted_data = f"Error decrypting data: {e}"
         block_info = (
