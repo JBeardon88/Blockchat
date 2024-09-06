@@ -22,5 +22,16 @@ def handle_command(command, node):
         node.load_state()
     elif command == '/clear':
         node.clear_console()
+    elif command == '/register':
+        node.register_user()
+    elif command.startswith('/login'):
+        parts = command.split(' ', 1)
+        if len(parts) < 2:
+            print("\033[91mUsage: /login <seed_phrase>\033[0m")
+        else:
+            _, seed_phrase = parts
+            node.login_user(seed_phrase)
+    elif command == '/fullname':
+        print(f"Full name: {node.get_fullname()}")
     else:
         print("\033[91mUnknown command. Type /help for a list of commands.\033[0m")

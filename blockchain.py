@@ -49,7 +49,7 @@ class Blockchain:
             timestamp=0,
             data={
                 'title': 'B L O C K C H A T --- G A N G',
-                'preamble': 'A simple blockchain based chat application. Decentralized, communal, cool as fuck.',
+                'preamble': 'Simple, decentralized, grassroots. New features are only addded when needed. Keep it simple, keep it safe, keep it secure.',
                 'articles': [
                     'Origin Users: These are the original users of the blockchain. They are the first users to join the network.',
                     'Rule 1: Example',

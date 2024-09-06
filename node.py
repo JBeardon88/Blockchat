@@ -11,12 +11,16 @@ from commands import handle_command
 from config import KNOWN_PEERS, SYNC_INTERVAL
 from network import send_to_peer, receive_from_peer, recvall, get_peer_addr
 from encryption import encrypt_message, decrypt_message, generate_rsa_key_pair, encrypt_key_with_rsa, decrypt_key_with_rsa
+from Crypto.PublicKey import RSA
+from Crypto.Protocol.KDF import PBKDF2
+from mnemonic import Mnemonic
 
 class Node:
     def __init__(self, host, port, username):
         self.host = host
         self.port = port
         self.username = username
+        self.registered_username = None
         self.blockchain = Blockchain()
         self.peers = {}
         self.running = True
@@ -153,6 +157,8 @@ class Node:
         self.symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_key)
         print(f"\033[92mSymmetric key received and decrypted: {self.symmetric_key}\033[0m")
 
+
+
     def add_to_blockchain(self, data):
         encrypted_data = encrypt_message(json.dumps(data), self.symmetric_key)
         print(f"Encrypted data to be added to blockchain: {encrypted_data}")
@@ -188,6 +194,63 @@ class Node:
             print("\033[92mBlockchain updated with longer chain from peer.\033[0m")
         else:
             print("\033[91mReceived blockchain is invalid or not longer.\033[0m")
+
+    def register_user(self):
+        block_index = len(self.blockchain.chain)
+        block_hash = self.blockchain.get_latest_block().hash[:4]  # First 4 chars of hash
+        unique_username = f"{self.username}.{block_index}.{block_hash}"
+        seed_phrase = self.generate_seed_phrase()
+        registration_data = {
+            'username': unique_username,
+            'type': 'registration',
+            'timestamp': time.time()
+        }
+        self.add_to_blockchain(registration_data)
+        print(f"User registered: {unique_username}")
+        print(f"Seed phrase: {seed_phrase}")
+
+    def generate_seed_phrase(self):
+        mnemo = Mnemonic("english")
+        seed_phrase = mnemo.generate(strength=128)  # Generates a 12-word seed phrase
+        return seed_phrase
+
+    def login_user(self, seed_phrase):
+        print("Starting login process...")
+        mnemo = Mnemonic("english")
+        if mnemo.check(seed_phrase):
+            print("Seed phrase is valid.")
+            seed = mnemo.to_seed(seed_phrase)
+            print("Seed generated from seed phrase.")
+            # Derive a valid RSA key from the seed using PBKDF2
+            derived_key = PBKDF2(seed, b'salt', dkLen=32, count=1000)  # Reduced iteration count
+            print("Derived key generated.")
+            # Simplify RSA key generation
+            private_key = RSA.generate(2048, randfunc=os.urandom)
+            print("RSA key generated.")
+            self.private_key = private_key.export_key()
+            print("Private key exported.")
+            self.public_key = private_key.publickey().export_key()
+            print("Public key exported.")
+            print(f"User logged in with seed phrase: {seed_phrase}")
+            # Retrieve and store the registered username
+            for block in self.blockchain.chain:
+                if isinstance(block.data, str):
+                    try:
+                        data = json.loads(decrypt_message(block.data, self.symmetric_key))
+                        print(f"Decrypted data: {data}")  # Debugging line
+                        if data.get('type') == 'registration' and data.get('username').startswith(self.username):
+                            self.registered_username = data.get('username')
+                            print(f"Registered username found: {self.registered_username}")  # Debugging line
+                            break
+                    except Exception as e:
+                        print(f"Error during decryption: {e}")
+        else:
+            print("\033[91mInvalid seed phrase.\033[0m")
+
+    def get_fullname(self):
+        return self.registered_username if self.registered_username else self.username
+
+    
 
     def receive_block(self, block_data):
         block = Block.from_dict(block_data)
@@ -313,4 +376,16 @@ if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
     username = input("Enter your username: ")
     node = Node('localhost', port, username)
+    
+    while True:
+        choice = input("Do you want to (1) Connect or (2) Login? Enter 1 or 2: ")
+        if choice == '1':
+            break
+        elif choice == '2':
+            seed_phrase = input("Enter your seed phrase: ")
+            node.login_user(seed_phrase)
+            break
+        else:
+            print("Invalid choice. Please enter 1 or 2.")
+    
     node.start()

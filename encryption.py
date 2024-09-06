@@ -39,16 +39,18 @@ def encrypt_message(message, key):
         print(f"Error during encryption: {e}")
         raise
 
-# Decrypt message with AES
+
 def decrypt_message(encrypted_message, key):
     try:
+        if isinstance(encrypted_message, str):
+            encrypted_message = encrypted_message.encode('utf-8')
         iv = base64.b64decode(encrypted_message[:24])
         ct = base64.b64decode(encrypted_message[24:])
-        print(f"Decryption Debug - Encrypted Message: {encrypted_message}, IV: {iv}, Ciphertext: {ct}")
+        #print(f"Decryption Debug - Encrypted Message: {encrypted_message}, IV: {iv}, Ciphertext: {ct}")
         cipher = AES.new(key, AES.MODE_CBC, iv)
         decrypted = cipher.decrypt(ct)
         pt = unpad(decrypted, AES.block_size)
-        print(f"Decryption Debug - Plaintext: {pt.decode('utf-8')}")
+        #print(f"Decryption Debug - Plaintext: {pt.decode('utf-8')}")
         return pt.decode('utf-8')
     except Exception as e:
         print(f"Error during decryption: {e}")

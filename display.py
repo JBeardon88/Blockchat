@@ -18,7 +18,13 @@ def display_chat_history(chat_history):
     print("\n--- Chat History ---")
     for msg in chat_history:
         if isinstance(msg, dict):
-            print(f"\033[94m{msg['username']}\033[0m: {msg['content']}")
+            if 'content' in msg:
+                if '.' in msg['username']:
+                    print(f"\033[95m\033[3m{msg['username']}\033[0m: {msg['content']}")  # Pink italics for registered users
+                else:
+                    print(f"\033[94m{msg['username']}\033[0m: {msg['content']}")
+            elif 'username' in msg and 'type' in msg and msg['type'] == 'registration':
+                print(f"\033[95m\033[3m{msg['username']} registered.\033[0m")
     print("--------------------")
 
 def display_new_block(latest_block, symmetric_key):
@@ -38,7 +44,6 @@ def display_new_block(latest_block, symmetric_key):
         f"--------------------\n"
     )
     print(block_info)
-
 def display_latest_block(latest_block, symmetric_key):
     if not latest_block:
         print("\033[91mNo blocks in the chain yet.\033[0m")
