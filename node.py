@@ -112,7 +112,7 @@ class Node:
                 if self.symmetric_key is None:
                     self.symmetric_key = os.urandom(32)
                 encrypted_symmetric_key = encrypt_key_with_rsa(self.peer_public_key, self.symmetric_key)
-                print(f"Handshake Debug - Symmetric Key: {self.symmetric_key}, Encrypted Symmetric Key: {encrypted_symmetric_key}")
+                #print(f"Handshake Debug - Symmetric Key: {self.symmetric_key}, Encrypted Symmetric Key: {encrypted_symmetric_key}")
                 send_to_peer(sock, json.dumps({
                     'type': 'symmetric_key',
                     'data': encrypted_symmetric_key
