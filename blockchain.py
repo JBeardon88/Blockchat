@@ -49,12 +49,12 @@ class Blockchain:
             timestamp=0,
             data={
                 'title': 'B L O C K C H A T --- G A N G',
-                'preamble': 'Simple, decentralized, grassroots. New features are only addded when needed. Keep it simple, keep it safe, keep it secure.',
+                'preamble': 'Keep it safe.',
                 'articles': [
-                    'Origin Users: These are the original users of the blockchain. They are the first users to join the network.',
+                    'Eventually I will make a list of things that users can vote on which will change rules and grant permissions.',
                     'Rule 1: Example',
                     'Rule 2: I\'ll think of it later.',
-                    'Rule 3: voting is the only way to mint new members.'
+                    'Rule 3: voting is the only way to mint new members to certain groups.'
                 ]
             },
             previous_hash='0'

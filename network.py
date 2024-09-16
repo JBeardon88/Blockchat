@@ -9,6 +9,7 @@ def send_to_peer(sock, message):
         # Prefix each message with a 4-byte length (network byte order)
         msg = struct.pack('>I', len(msg)) + msg
         sock.sendall(msg)
+        print(f"Sent message to peer: {message}")
     except Exception as e:
         print(f"\033[91mError sending message to peer: {e}\033[0m")
 
@@ -21,6 +22,7 @@ def receive_from_peer(sock):
         msglen = struct.unpack('>I', raw_msglen)[0]
         # Read the message data
         message = recvall(sock, msglen).decode('utf-8')
+        print(f"Received message from peer: {message}")
         return json.loads(message)  # Ensure the message is parsed as a dictionary
     except Exception as e:
         print(f"\033[91mError receiving message from peer: {e}\033[0m")

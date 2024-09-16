@@ -31,6 +31,13 @@ def handle_command(command, node):
         else:
             _, seed_phrase = parts
             node.login_user(seed_phrase)
+    elif command.startswith('/pm'):
+        parts = command.split(' ', 2)
+        if len(parts) < 3:
+            print("\033[91mUsage: /pm <username> <message>\033[0m")
+        else:
+            _, recipient, message = parts
+            node.send_private_message(recipient, message)
     elif command == '/fullname':
         print(f"Full name: {node.get_fullname()}")
     else:

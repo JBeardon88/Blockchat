@@ -1,3 +1,4 @@
+
 import socket
 import threading
 import json
@@ -10,10 +11,17 @@ from display import display_help, display_chat_history, display_new_block, displ
 from commands import handle_command
 from config import KNOWN_PEERS, SYNC_INTERVAL
 from network import send_to_peer, receive_from_peer, recvall, get_peer_addr
-from encryption import encrypt_message, decrypt_message, generate_rsa_key_pair, encrypt_key_with_rsa, decrypt_key_with_rsa
+from encryption import encrypt_message, decrypt_message, generate_rsa_key_pair, encrypt_key_with_rsa, decrypt_key_with_rsa, decrypt_private_message
 from Crypto.PublicKey import RSA
 from Crypto.Protocol.KDF import PBKDF2
 from mnemonic import Mnemonic
+import base64
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.backends import default_backend
+import hashlib
+
+
 
 class Node:
     def __init__(self, host, port, username):
@@ -39,7 +47,10 @@ class Node:
 
         # Generate RSA key pair
         self.private_key, self.public_key = generate_rsa_key_pair()
-        self.symmetric_key = None
+        # - it used to be this instead of the below - self.symmetric_key = None
+        self.symmetric_key = os.urandom(32)  # Generate a default symmetric key
+        self.recipient_symmetric_keys = {}   # Dictionary to store keys for private messages
+        self.private_message_keys = {}
 
     def start(self):
         self.server_thread.start()
@@ -100,6 +111,8 @@ class Node:
         send_to_peer(sock, handshake_message)
         print(f"\033[92mInitiated handshake with {addr[0]}:{addr[1]}\033[0m")
 
+
+
     def handle_handshake(self, message, sock, addr):
         with self.handshake_lock:
             if addr not in self.handshake_completed:
@@ -112,12 +125,17 @@ class Node:
                 if self.symmetric_key is None:
                     self.symmetric_key = os.urandom(32)
                 encrypted_symmetric_key = encrypt_key_with_rsa(self.peer_public_key, self.symmetric_key)
-                #print(f"Handshake Debug - Symmetric Key: {self.symmetric_key}, Encrypted Symmetric Key: {encrypted_symmetric_key}")
+
+                # Base64 encode the encrypted symmetric key
+                encoded_encrypted_symmetric_key = base64.b64encode(encrypted_symmetric_key).decode('utf-8')
+
                 send_to_peer(sock, json.dumps({
                     'type': 'symmetric_key',
-                    'data': encrypted_symmetric_key
+                    'data': encoded_encrypted_symmetric_key  # Use Base64-encoded string
                 }))
+                print(f"\033[92mSent encrypted symmetric key to {addr[0]}:{addr[1]}\033[0m")
 
+                # Send blockchain or request it
                 self.send_blockchain(sock)
                 self.request_full_blockchain(sock)
 
@@ -130,32 +148,323 @@ class Node:
             self.process_message(message, sock)
         self.remove_peer(sock, addr)
 
+    def add_public_key(self, username, public_key):
+        # Store the public key for the given username
+        if not hasattr(self, 'public_keys'):
+            self.public_keys = {}
+        self.public_keys[username] = public_key
+        print(f"\033[92mAdded public key for user {username}\033[0m")
+
+
+    def handle_regular_message(self, message):
+        if isinstance(message, dict):
+            if message.get('type') == 'registration':
+                username = message.get('username')
+                public_key = message.get('public_key')
+                print(f"\033[92mNew user registered: {username}\033[0m")
+                self.add_public_key(username, public_key)
+            else:
+                print(f"\033[93mReceived regular message: {json.dumps(message, indent=2)}\033[0m")
+        else:
+            print(f"\033[93mReceived regular message: {message}\033[0m")
+
+
+    def is_registered_user(self, username):
+        for block in self.blockchain.chain:
+            if isinstance(block.data, str):
+                try:
+                    data = json.loads(decrypt_message(block.data, self.symmetric_key))
+                    if data.get('type') == 'registration' and data.get('username') == username:
+                        return True
+                except Exception as e:
+                    print(f"Error during decryption: {e}")
+        return False
+
+    def get_public_key(self, username):
+        if hasattr(self, 'public_keys') and username in self.public_keys:
+            public_key = self.public_keys[username]
+            print(f"\033[92mPublic key for {username} found in memory\033[0m")
+            return public_key.encode('utf-8') if isinstance(public_key, str) else public_key
+
+        # If not found in memory, search in the blockchain
+        for block in self.blockchain.chain:
+            if isinstance(block.data, str):
+                try:
+                    data = json.loads(decrypt_message(block.data, self.symmetric_key))
+                    if data.get('type') == 'registration' and data.get('username') == username:
+                        public_key = data.get('public_key')
+                        print(f"\033[92mPublic key for {username} found in blockchain\033[0m")
+                        # Store the key in memory for future use
+                        self.add_public_key(username, public_key)
+                        return public_key.encode('utf-8') if isinstance(public_key, str) else public_key
+                except Exception as e:
+                    print(f"Error during decryption: {e}")
+        print(f"Public key for {username} not found.")
+        return None
+
+    #will this weird shit help? Let's find out!? 
+
+    def print_public_key(self):
+        public_key = self.public_key.export_key().decode()
+        print(f"My public key:\n{public_key}")
+
     def process_message(self, message, sock):
         if isinstance(message, str):
             try:
                 message = json.loads(message)
-            except json.JSONDecodeError as e:
-                print(f"\033[91mError decoding message: {e}\033[0m")
+            except json.JSONDecodeError:
+                print(f"\033[91mError: Unable to parse message as JSON\033[0m")
                 return
+
         message_type = message.get('type')
-        if message_type == 'handshake':
+
+        if message_type == 'new_block':
+            block_data = message.get('data')
+            if not block_data:
+                print(f"\033[91mError: New block message doesn't contain data\033[0m")
+                return
+
+            self.receive_block(block_data)
+
+            try:
+                # Decrypting block data
+                decrypted_block_data = decrypt_message(block_data['data'], self.symmetric_key)
+
+                # Debug the decrypted data
+                print(f"DEBUG: Decrypted block data: {decrypted_block_data[:100]}")  # First 100 chars for debugging
+
+                # Checking the result of decryption
+                if not decrypted_block_data:
+                    print(f"\033[91mError: Decrypted block data is None, possibly incorrect key or block format.\033[0m")
+                    return
+
+                print(f"Decrypted Block Data (raw): {decrypted_block_data[:100]}...")  # Show the first 100 characters
+
+                # Attempt to parse the decrypted data as JSON
+                try:
+                    parsed_block_data = json.loads(decrypted_block_data)
+                    print(f"Parsed Block Data (as JSON): {json.dumps(parsed_block_data, indent=2)}")
+                    
+                    if parsed_block_data.get('type') == 'private_message_key':
+                        self.handle_private_message_key(parsed_block_data)
+                    elif parsed_block_data.get('type') == 'private_message_content':
+                        self.handle_private_message_content(parsed_block_data)
+                    else:
+                        print(f"\033[93mProcessing non-private message: {json.dumps(parsed_block_data, indent=2)}\033[0m")
+                        self.handle_regular_message(parsed_block_data)
+
+                except json.JSONDecodeError:
+                    print(f"\033[93mBlock data failed JSON decoding. Treating as raw string.\033[0m")
+                    self.handle_regular_message({'content': decrypted_block_data})
+
+            except Exception as e:
+                print(f"\033[91mException during block processing: {e}\033[0m")
+                import traceback
+                traceback.print_exc()
+
+        elif message_type == 'handshake':
             self.handle_handshake(message, sock, get_peer_addr(self.peers, sock))
         elif message_type == 'blockchain':
             self.handle_blockchain(message['data'])
-        elif message_type == 'new_block':
-            self.receive_block(message['data'])
         elif message_type == 'request_blockchain':
             self.send_blockchain(sock)
         elif message_type == 'symmetric_key':
             self.handle_symmetric_key(message['data'])
         elif message_type == 'ping':
             print(f"\033[92mReceived ping from {get_peer_addr(self.peers, sock)}\033[0m")
+        elif message_type == 'private_message':
+            print(f"\033[92mReceived private message: {message}\033[0m")
+            self.handle_private_message(message)
+        elif message_type == 'poke':
+            self.handle_poke(message)
+        elif message_type == 'poke_response':
+            self.handle_poke_response(message)
         else:
             print(f"\033[91mUnknown message type: {message_type}\033[0m")
 
-    def handle_symmetric_key(self, encrypted_key):
-        self.symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_key)
-        print(f"\033[92mSymmetric key received and decrypted: {self.symmetric_key}\033[0m")
+
+    def send_private_message(self, recipient, message):
+        if not self.is_registered_user(recipient):
+            print(f"\033[91mRecipient {recipient} is not a registered user.\033[0m")
+            return
+
+        recipient_public_key = self.get_public_key(recipient)
+        if not recipient_public_key:
+            print(f"\033[91mCould not retrieve public key for {recipient}.\033[0m")
+            return
+
+        print(f"\033[92mFound public key for {recipient}: {recipient_public_key}\033[0m")
+
+        # Generate a symmetric key for the private message
+        symmetric_key = os.urandom(32)  # Ensure it's 32 bytes for AES-256
+        encrypted_symmetric_key = encrypt_key_with_rsa(recipient_public_key, symmetric_key)
+        
+        # Base64 encode the encrypted symmetric key once
+        encoded_symmetric_key = base64.b64encode(encrypted_symmetric_key).decode('utf-8')
+        
+        print(f"Generated symmetric key (raw): {symmetric_key.hex()}")
+        print(f"Encrypted symmetric key (base64): {encoded_symmetric_key}")
+        
+        # Part 1: Send the symmetric key
+        key_message = {
+            'type': 'private_message_key',
+            'sender': self.get_fullname(),
+            'recipient': recipient,
+            'symmetric_key': encoded_symmetric_key  # Use the Base64 encoded key here
+        }
+        self.add_to_blockchain(key_message)
+        print(f"\033[92mSent symmetric key for private message to {recipient}\033[0m")
+
+        # Encrypt the message content with the symmetric key
+        encrypted_message_content = encrypt_message(message, symmetric_key)
+        print(f"Encrypted message content: {encrypted_message_content}")
+
+        # Part 2: Send the actual message
+        private_message = {
+            'type': 'private_message_content',
+            'sender': self.get_fullname(),
+            'recipient': recipient,
+            'content': encrypted_message_content,
+            'timestamp': time.time()
+        }
+        self.add_to_blockchain(private_message)
+        print(f"\033[92mSent private message content to {recipient}\033[0m")
+
+
+    def handle_private_message(self, message):
+        try:
+            if message['recipient'] != self.get_fullname():
+                return  # This message is not for us
+
+            sender = message['sender']
+            encrypted_content = message['content']
+            print(f"Received encrypted content: {encrypted_content}")
+
+            if sender not in self.private_message_keys:
+                print(f"\033[91mError: No symmetric key found for sender {sender}\033[0m")
+                return
+
+            encrypted_symmetric_key = self.private_message_keys[sender]
+            print(f"Encrypted symmetric key: {encrypted_symmetric_key}")
+
+            # Decrypt the symmetric key
+            symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_symmetric_key)
+            print(f"Decrypted symmetric key (hex): {symmetric_key.hex()}")
+            print(f"Decrypted symmetric key (raw): {symmetric_key}")
+
+            # Decrypt the message content
+            try:
+                decrypted_content = decrypt_message(encrypted_content, symmetric_key)
+                print(f"Decrypted content: {decrypted_content}")
+            except Exception as decrypt_error:
+                print(f"Error during decryption: {decrypt_error}")
+                print(f"Encrypted content type: {type(encrypted_content)}")
+                print(f"Symmetric key type: {type(symmetric_key)}")
+                raise
+
+            if decrypted_content:
+                print(f"\033[95m[Private] {sender}: {decrypted_content}\033[0m")
+                # Add the decrypted message to chat history
+                self.chat_history.append({
+                    'type': 'private_message',
+                    'sender': sender,
+                    'content': decrypted_content,
+                    'timestamp': message.get('timestamp', time.time())
+                })
+                self.update_display()
+            else:
+                print(f"\033[91mError: Failed to decrypt message from {sender}\033[0m")
+
+            # Remove the used symmetric key
+            del self.private_message_keys[sender]
+
+        except Exception as e:
+            print(f"\033[91mError handling private message: {e}\033[0m")
+            import traceback
+            traceback.print_exc()
+
+
+
+
+
+    def handle_private_message_key(self, message):
+        if message['recipient'] != self.get_fullname():
+            return  # This message is not for us
+
+        sender = message['sender']
+        encrypted_symmetric_key = message['symmetric_key']
+        
+        print(f"Received symmetric key for private message from {sender}")
+        print(f"Encrypted symmetric key: {encrypted_symmetric_key}")
+
+        # Decrypt the message-specific symmetric key
+        try:
+            # Base64 decode the encrypted symmetric key
+            encrypted_symmetric_key_bytes = base64.b64decode(encrypted_symmetric_key)
+            
+            # Decrypt using recipient's private RSA key
+            message_symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_symmetric_key_bytes)
+            print(f"Decrypted message symmetric key (hex): {message_symmetric_key.hex()}")
+            
+            # Store the decrypted message-specific symmetric key
+            self.private_message_keys[sender] = message_symmetric_key
+        except Exception as e:
+            print(f"Error decrypting message-specific symmetric key: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_private_message_content(self, message):
+        if message['recipient'] != self.get_fullname():
+            return  # This message is not for us
+
+        sender = message['sender']
+        encrypted_content = message['content']
+
+        if sender not in self.private_message_keys:
+            print(f"\033[91mError: No symmetric key found for sender {sender}\033[0m")
+            return
+
+        message_symmetric_key = self.private_message_keys[sender]
+        
+        try:
+            # Decrypt the message content using the message-specific symmetric key
+            decrypted_content = decrypt_message(encrypted_content, message_symmetric_key)
+            
+            print(f"\033[92mPrivate message from {sender}: {decrypted_content}\033[0m")
+            
+            # Add the decrypted message to chat history
+            self.chat_history.append({
+                'type': 'private_message',
+                'sender': sender,
+                'content': decrypted_content,
+                'timestamp': message.get('timestamp', time.time())
+            })
+            self.update_display()
+            
+            # Remove the used symmetric key
+            del self.private_message_keys[sender]
+        except Exception as e:
+            print(f"\033[91mError decrypting private message: {e}\033[0m")
+            import traceback
+            traceback.print_exc()
+
+
+
+
+
+
+
+    def handle_symmetric_key(self, encoded_encrypted_key):
+        print(f"\033[93mEncrypted symmetric key received: {encoded_encrypted_key}\033[0m")  # Debugging log for incoming symmetric key
+
+        # Base64 decode the encrypted symmetric key
+        encrypted_key_bytes = base64.b64decode(encoded_encrypted_key)
+
+        # Decrypt the symmetric key using our private RSA key
+        self.symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_key_bytes)
+        print(f"\033[92mSymmetric key received and decrypted: {self.symmetric_key.hex()}\033[0m")
+
+
 
 
 
@@ -170,7 +479,6 @@ class Node:
         )
         if self.blockchain.add_block(new_block):
             self.sync_chat_history()
-            self.update_display()
             self.broadcast_new_block(new_block)
             print(f"\033[92mNew block added: {new_block.index}\033[0m")
         else:
@@ -195,19 +503,45 @@ class Node:
         else:
             print("\033[91mReceived blockchain is invalid or not longer.\033[0m")
 
+
     def register_user(self):
+        seed_phrase = self.generate_seed_phrase()
+        mnemo = Mnemonic("english")
+        seed = mnemo.to_seed(seed_phrase)
+
+        # Derive the RSA key pair from the seed
+        private_key = self.derive_rsa_key_from_seed(seed)
+        self.private_key = private_key.export_key()
+        self.public_key = private_key.publickey().export_key()
+
         block_index = len(self.blockchain.chain)
         block_hash = self.blockchain.get_latest_block().hash[:4]  # First 4 chars of hash
         unique_username = f"{self.username}.{block_index}.{block_hash}"
-        seed_phrase = self.generate_seed_phrase()
+
         registration_data = {
             'username': unique_username,
             'type': 'registration',
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'public_key': self.public_key.decode('utf-8')
         }
         self.add_to_blockchain(registration_data)
         print(f"User registered: {unique_username}")
         print(f"Seed phrase: {seed_phrase}")
+        print("Please save your seed phrase securely. You will need it to log in.")
+
+        # Automatically log in the user
+        self.username = unique_username
+        self.login_user(seed_phrase)
+
+    def broadcast_registration(self, registration_data):
+        for peer_sock in self.peers.values():
+            try:
+                send_to_peer(peer_sock, json.dumps({
+                    'type': 'registration',
+                    'data': registration_data
+                }))
+            except Exception as e:
+                print(f"Failed to send registration to peer: {e}")
 
     def generate_seed_phrase(self):
         mnemo = Mnemonic("english")
@@ -221,36 +555,56 @@ class Node:
             print("Seed phrase is valid.")
             seed = mnemo.to_seed(seed_phrase)
             print("Seed generated from seed phrase.")
-            # Derive a valid RSA key from the seed using PBKDF2
-            derived_key = PBKDF2(seed, b'salt', dkLen=32, count=1000)  # Reduced iteration count
-            print("Derived key generated.")
-            # Simplify RSA key generation
-            private_key = RSA.generate(2048, randfunc=os.urandom)
-            print("RSA key generated.")
+
+            # Derive the RSA key pair from the seed
+            private_key = self.derive_rsa_key_from_seed(seed)
             self.private_key = private_key.export_key()
-            print("Private key exported.")
             self.public_key = private_key.publickey().export_key()
-            print("Public key exported.")
-            print(f"User logged in with seed phrase: {seed_phrase}")
+
+            print("RSA key derived from seed phrase.")
+            print(f"Public Key: {self.public_key.decode('utf-8')}")
+            print(f"Private Key: {self.private_key.decode('utf-8')}")
+
             # Retrieve and store the registered username
             for block in self.blockchain.chain:
                 if isinstance(block.data, str):
                     try:
                         data = json.loads(decrypt_message(block.data, self.symmetric_key))
-                        print(f"Decrypted data: {data}")  # Debugging line
                         if data.get('type') == 'registration' and data.get('username').startswith(self.username):
                             self.registered_username = data.get('username')
-                            print(f"Registered username found: {self.registered_username}")  # Debugging line
+                            print(f"Registered username found: {self.registered_username}")
                             break
                     except Exception as e:
                         print(f"Error during decryption: {e}")
         else:
             print("\033[91mInvalid seed phrase.\033[0m")
 
+
+
+    def derive_rsa_key_from_seed(self,seed):
+        seed_hash = hashlib.sha256(seed).digest()
+        counter = 0
+
+        def deterministic_get_random_bytes(n):
+            nonlocal counter
+            output = b''
+            while len(output) < n:
+                counter_bytes = counter.to_bytes(4, 'big')
+                data = seed_hash + counter_bytes
+                output += hashlib.sha256(data).digest()
+                counter += 1
+            return output[:n]
+
+        key = RSA.generate(2048, randfunc=deterministic_get_random_bytes)
+        return key
+
+
+
+
+
     def get_fullname(self):
         return self.registered_username if self.registered_username else self.username
 
-    
 
     def receive_block(self, block_data):
         block = Block.from_dict(block_data)
@@ -344,8 +698,12 @@ class Node:
 
     def update_display(self):
         self.clear_console()
+        display_chat_history(self.chat_history, self.get_fullname())
+        if self.blockchain.chain:
+            display_latest_block(self.blockchain.get_latest_block(), self.symmetric_key)
+
+    def display_chat_history(self):
         display_chat_history(self.chat_history)
-        display_new_block(self.blockchain.get_latest_block(), self.symmetric_key)
 
     def display_constitution(self):
         genesis_block = self.blockchain.chain[0]
@@ -371,7 +729,9 @@ class Node:
     def request_full_blockchain(self, sock):
         send_to_peer(sock, json.dumps({'type': 'request_blockchain'}))
 
+
 if __name__ == "__main__":
+
     import sys
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5001
     username = input("Enter your username: ")

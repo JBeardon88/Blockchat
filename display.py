@@ -14,18 +14,43 @@ def display_help():
     print("/load - Load the blockchain and peer list from disk")
     print("/clear - Clear the console")
 
-def display_chat_history(chat_history):
-    print("\n--- Chat History ---")
+def display_chat_history(chat_history, current_user):
+    print("\n\033[93m--- Chat History ---\033[0m")
     for msg in chat_history:
         if isinstance(msg, dict):
-            if 'content' in msg:
-                if '.' in msg['username']:
-                    print(f"\033[95m\033[3m{msg['username']}\033[0m: {msg['content']}")  # Pink italics for registered users
+            if msg.get('type') in ['private_message_key', 'private_message_content']:
+                # Handle private message components
+                sender = msg.get('sender', 'Unknown')
+                recipient = msg.get('recipient', 'Unknown')
+                if recipient == current_user:
+                    if msg['type'] == 'private_message_key':
+                        print(f"\033[95m[Private Key] From {sender}\033[0m")
+                    else:
+                        content = msg.get('content', 'No content')
+                        timestamp = msg.get('timestamp', time.time())
+                        time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))
+                        print(f"\033[95m[{time_str}] {sender} (Private): {content}\033[0m")
                 else:
-                    print(f"\033[94m{msg['username']}\033[0m: {msg['content']}")
-            elif 'username' in msg and 'type' in msg and msg['type'] == 'registration':
-                print(f"\033[95m\033[3m{msg['username']} registered.\033[0m")
-    print("--------------------")
+                    # For non-recipients, just show a discreet notification
+                    print(f"\033[93m[Private message exchanged]\033[0m")
+            elif 'username' in msg and 'content' in msg:
+                # Handle regular chat messages
+                username = msg['username']
+                content = msg['content']
+                timestamp = msg.get('timestamp', time.time())
+                time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))
+                if '.' in username:
+                    print(f"\033[95m[{time_str}] \033[3m{username}\033[0m: {content}")  # Pink italics for registered users
+                else:
+                    print(f"\033[94m[{time_str}] {username}\033[0m: {content}")
+            elif msg.get('type') == 'system':
+                # Handle system messages
+                content = msg.get('content', 'System message')
+                print(f"\033[92m{content}\033[0m")
+        elif isinstance(msg, str):
+            # Handle string messages (like old-style registration notifications)
+            print(f"\033[92m{msg}\033[0m")
+    print("\033[93m--------------------\033[0m")
 
 def display_new_block(latest_block, symmetric_key):
     if not latest_block:
@@ -44,6 +69,7 @@ def display_new_block(latest_block, symmetric_key):
         f"--------------------\n"
     )
     print(block_info)
+
 def display_latest_block(latest_block, symmetric_key):
     if not latest_block:
         print("\033[91mNo blocks in the chain yet.\033[0m")
