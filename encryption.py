@@ -1,10 +1,20 @@
 from Crypto.Cipher import AES, PKCS1_OAEP
-from Crypto.Util.Padding import pad, unpad
 from Crypto.PublicKey import RSA
 from Crypto.Random import get_random_bytes
 import base64
 import json
 import os
+
+
+# Implement PKCS7 padding manually
+def pad(data, block_size):
+    padding_length = block_size - (len(data) % block_size)
+    padding = bytes([padding_length] * padding_length)
+    return data + padding
+
+def unpad(data):
+    padding_length = data[-1]
+    return data[:-padding_length]
 
 # Generate RSA key pair
 def generate_rsa_key_pair():
@@ -20,12 +30,11 @@ def encrypt_key_with_rsa(public_key, key):
     encrypted_key = cipher_rsa.encrypt(key)
     return encrypted_key  # Return bytes directly
 
-
 # Decrypt symmetric key with RSA private key
-def decrypt_key_with_rsa(private_key, encrypted_key_bytes):
+def decrypt_key_with_rsa(private_key, encrypted_key):
     rsa_key = RSA.import_key(private_key)
     cipher_rsa = PKCS1_OAEP.new(rsa_key)
-    key = cipher_rsa.decrypt(encrypted_key_bytes)
+    key = cipher_rsa.decrypt(encrypted_key)
     return key
 
 
@@ -43,24 +52,44 @@ def encrypt_message(message, key):
         return None
 
 def decrypt_message(encrypted_message, key):
+
+
     try:
         print(f"Attempting to decrypt message: {encrypted_message[:50]}...")
         print(f"Using key (hex): {key.hex()}")
-        encrypted_data = base64.b64decode(encrypted_message)
-        print(f"Base64 decoded data (first 16 bytes): {encrypted_data[:16].hex()}")
-        iv = encrypted_data[:AES.block_size]
+
+        # Check if the input is already in bytes format
+        if isinstance(encrypted_message, str):
+            # If it's a string, assume it's base64 encoded and decode it
+            ciphertext = base64.b64decode(encrypted_message)
+        else:
+            # If it's already bytes, use it directly
+            ciphertext = encrypted_message
+
+        print(f"Ciphertext (first 16 bytes): {ciphertext[:16].hex()}")
+
+        # Extract the IV (first 16 bytes)
+        iv = ciphertext[:16]
         print(f"IV: {iv.hex()}")
+
+        # Create a new AES cipher object
         cipher = AES.new(key, AES.MODE_CBC, iv)
-        decrypted_data = unpad(cipher.decrypt(encrypted_data[AES.block_size:]), AES.block_size)
-        result = decrypted_data.decode('utf-8')
-        print(f"Decrypted message (first 50 chars): {result[:50]}...")
+
+        # Decrypt the message
+        decrypted_padded = cipher.decrypt(ciphertext[16:])
+        print(f"Decrypted padded message (hex): {decrypted_padded.hex()}")
+
+        # Remove padding
+        decrypted = unpad(decrypted_padded)
+        print(f"Decrypted unpadded message (hex): {decrypted.hex()}")
+
+        # Decode the decrypted message from bytes to string
+        result = decrypted.decode('utf-8')
+        print(f"Decrypted message: {result}")
         return result
     except Exception as e:
-        print(f"Error decrypting message: {e}")
-        print(f"Encrypted message type: {type(encrypted_message)}")
-        print(f"Key type: {type(key)}")
-        print(f"Key length: {len(key)}")
-        return None
+        print(f"Error in decrypt_message: {e}")
+        raise
 
 def encrypt_private_message(recipient_public_key, message, blockchain_symmetric_key):
     try:

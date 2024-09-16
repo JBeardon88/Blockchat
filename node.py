@@ -48,7 +48,7 @@ class Node:
         # Generate RSA key pair
         self.private_key, self.public_key = generate_rsa_key_pair()
         # - it used to be this instead of the below - self.symmetric_key = None
-        self.symmetric_key = os.urandom(32)  # Generate a default symmetric key
+        self.symmetric_key = None  # Generate a default symmetric key
         self.recipient_symmetric_keys = {}   # Dictionary to store keys for private messages
         self.private_message_keys = {}
 
@@ -275,6 +275,8 @@ class Node:
         elif message_type == 'private_message':
             print(f"\033[92mReceived private message: {message}\033[0m")
             self.handle_private_message(message)
+        elif message_type == 'private_message_content':
+            self.handle_private_message(message['data'])
         elif message_type == 'poke':
             self.handle_poke(message)
         elif message_type == 'poke_response':
@@ -332,54 +334,41 @@ class Node:
 
 
     def handle_private_message(self, message):
+        sender = message['sender']
+        recipient = message['recipient']
+        encrypted_content = message['content']
+        timestamp = message['timestamp']
+
+        if recipient != self.get_fullname():
+            return  # This message is not for us
+
+        print(f"Received private message from {sender}")
+        
+        if sender not in self.private_message_keys:
+            print(f"Error: No symmetric key found for {sender}")
+            return
+
+        message_symmetric_key = self.private_message_keys[sender]
+        
         try:
-            if message['recipient'] != self.get_fullname():
-                return  # This message is not for us
-
-            sender = message['sender']
-            encrypted_content = message['content']
-            print(f"Received encrypted content: {encrypted_content}")
-
-            if sender not in self.private_message_keys:
-                print(f"\033[91mError: No symmetric key found for sender {sender}\033[0m")
-                return
-
-            encrypted_symmetric_key = self.private_message_keys[sender]
-            print(f"Encrypted symmetric key: {encrypted_symmetric_key}")
-
-            # Decrypt the symmetric key
-            symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_symmetric_key)
-            print(f"Decrypted symmetric key (hex): {symmetric_key.hex()}")
-            print(f"Decrypted symmetric key (raw): {symmetric_key}")
-
-            # Decrypt the message content
-            try:
-                decrypted_content = decrypt_message(encrypted_content, symmetric_key)
-                print(f"Decrypted content: {decrypted_content}")
-            except Exception as decrypt_error:
-                print(f"Error during decryption: {decrypt_error}")
-                print(f"Encrypted content type: {type(encrypted_content)}")
-                print(f"Symmetric key type: {type(symmetric_key)}")
-                raise
-
-            if decrypted_content:
-                print(f"\033[95m[Private] {sender}: {decrypted_content}\033[0m")
-                # Add the decrypted message to chat history
-                self.chat_history.append({
-                    'type': 'private_message',
-                    'sender': sender,
-                    'content': decrypted_content,
-                    'timestamp': message.get('timestamp', time.time())
-                })
-                self.update_display()
-            else:
-                print(f"\033[91mError: Failed to decrypt message from {sender}\033[0m")
-
+            # Decrypt the message content using the message-specific symmetric key
+            decrypted_content = decrypt_message(encrypted_content, message_symmetric_key)
+            
+            print(f"\033[92mDecrypted private message from {sender}: {decrypted_content}\033[0m")
+            
+            # Add the decrypted message to chat history
+            self.chat_history.append({
+                'type': 'private_message',
+                'sender': sender,
+                'content': decrypted_content,
+                'timestamp': timestamp
+            })
+            self.update_display()
+            
             # Remove the used symmetric key
             del self.private_message_keys[sender]
-
         except Exception as e:
-            print(f"\033[91mError handling private message: {e}\033[0m")
+            print(f"\033[91mError decrypting private message: {e}\033[0m")
             import traceback
             traceback.print_exc()
 
@@ -408,49 +397,59 @@ class Node:
             
             # Store the decrypted message-specific symmetric key
             self.private_message_keys[sender] = message_symmetric_key
+            print(f"Stored symmetric key for {sender}")
         except Exception as e:
             print(f"Error decrypting message-specific symmetric key: {e}")
             import traceback
             traceback.print_exc()
 
+
+    def fix_base64_padding(self, base64_string):
+        return base64_string + '=' * (-len(base64_string) % 4)
+
     def handle_private_message_content(self, message):
-        if message['recipient'] != self.get_fullname():
-            return  # This message is not for us
-
         sender = message['sender']
-        encrypted_content = message['content']
+        if sender in self.private_message_keys:
+            encrypted_content = message['content']
 
-        if sender not in self.private_message_keys:
-            print(f"\033[91mError: No symmetric key found for sender {sender}\033[0m")
-            return
+            try:
+                # If encrypted_content is a string, decode it to bytes
+                if isinstance(encrypted_content, str):
+                    encrypted_content_bytes = base64.b64decode(encrypted_content)
+                else:
+                    encrypted_content_bytes = encrypted_content
 
-        message_symmetric_key = self.private_message_keys[sender]
-        
-        try:
-            # Decrypt the message content using the message-specific symmetric key
-            decrypted_content = decrypt_message(encrypted_content, message_symmetric_key)
-            
-            print(f"\033[92mPrivate message from {sender}: {decrypted_content}\033[0m")
-            
-            # Add the decrypted message to chat history
-            self.chat_history.append({
-                'type': 'private_message',
-                'sender': sender,
-                'content': decrypted_content,
-                'timestamp': message.get('timestamp', time.time())
-            })
-            self.update_display()
-            
-            # Remove the used symmetric key
-            del self.private_message_keys[sender]
-        except Exception as e:
-            print(f"\033[91mError decrypting private message: {e}\033[0m")
-            import traceback
-            traceback.print_exc()
+                print(f"Encrypted content (first 16 bytes): {encrypted_content_bytes[:16].hex()}")
 
+                # Retrieve the message-specific symmetric key
+                message_symmetric_key = self.private_message_keys[sender]
+                print(f"Decrypting message from {sender} using key: {message_symmetric_key.hex()}")
 
+                # Decrypt the message content using the message-specific symmetric key
+                decrypted_content = decrypt_message(encrypted_content_bytes, message_symmetric_key)
 
+                # Convert decrypted content to string if necessary
+                if isinstance(decrypted_content, bytes):
+                    decrypted_content = decrypted_content.decode('utf-8')
 
+                # Add the decrypted message to chat history
+                self.chat_history.append({
+                    'username': f"{sender} (Private)",
+                    'content': decrypted_content,
+                    'timestamp': message['timestamp']
+                })
+
+                # Update the display
+                self.update_display()
+
+                # Optionally, remove the symmetric key after use
+                # del self.private_message_keys[sender]
+            except Exception as e:
+                print(f"\033[91mError decrypting private message: {e}\033[0m")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"No symmetric key found for private message from {sender}")
 
 
 
