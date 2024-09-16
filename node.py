@@ -51,6 +51,8 @@ class Node:
         self.symmetric_key = None  # Generate a default symmetric key
         self.recipient_symmetric_keys = {}   # Dictionary to store keys for private messages
         self.private_message_keys = {}
+        print(f"Initialized private_message_keys: {self.private_message_keys}")
+        self.last_private_message_sender = None
 
     def start(self):
         self.server_thread.start()
@@ -286,51 +288,53 @@ class Node:
 
 
     def send_private_message(self, recipient, message):
-        if not self.is_registered_user(recipient):
-            print(f"\033[91mRecipient {recipient} is not a registered user.\033[0m")
-            return
+        print(f"Attempting to send private message to {recipient}")
+        print(f"Current private_message_keys: {list(self.private_message_keys.keys())}")
 
-        recipient_public_key = self.get_public_key(recipient)
-        if not recipient_public_key:
-            print(f"\033[91mCould not retrieve public key for {recipient}.\033[0m")
-            return
+        if recipient in self.private_message_keys:
+            print(f"Found existing key for {recipient}")
+            symmetric_key = self.private_message_keys[recipient]
+        else:
+            print(f"No existing key found for {recipient}. Initiating key exchange.")
+            recipient_public_key = self.get_public_key(recipient)
+            if not recipient_public_key:
+                print(f"\033[91mCould not retrieve public key for {recipient}.\033[0m")
+                return
 
-        print(f"\033[92mFound public key for {recipient}: {recipient_public_key}\033[0m")
+            # Generate a new symmetric key for this conversation
+            symmetric_key = os.urandom(32)  # 256-bit key
+            encrypted_symmetric_key = encrypt_key_with_rsa(recipient_public_key, symmetric_key)
+            
+            # Store the symmetric key for future use
+            self.private_message_keys[recipient] = symmetric_key
+            print(f"Generated and stored new symmetric key for {recipient}")
 
-        # Generate a symmetric key for the private message
-        symmetric_key = os.urandom(32)  # Ensure it's 32 bytes for AES-256
-        encrypted_symmetric_key = encrypt_key_with_rsa(recipient_public_key, symmetric_key)
+            # Send the encrypted symmetric key
+            key_message = {
+                'type': 'private_message_key',
+                'sender': self.get_fullname(),
+                'recipient': recipient,
+                'symmetric_key': base64.b64encode(encrypted_symmetric_key).decode('utf-8')
+            }
+            self.add_to_blockchain(key_message)
+            print(f"Sent encrypted symmetric key to {recipient}")
+
+        # Encrypt the actual message content
+        encrypted_content = encrypt_message(message, symmetric_key)
         
-        # Base64 encode the encrypted symmetric key once
-        encoded_symmetric_key = base64.b64encode(encrypted_symmetric_key).decode('utf-8')
-        
-        print(f"Generated symmetric key (raw): {symmetric_key.hex()}")
-        print(f"Encrypted symmetric key (base64): {encoded_symmetric_key}")
-        
-        # Part 1: Send the symmetric key
-        key_message = {
-            'type': 'private_message_key',
-            'sender': self.get_fullname(),
-            'recipient': recipient,
-            'symmetric_key': encoded_symmetric_key  # Use the Base64 encoded key here
-        }
-        self.add_to_blockchain(key_message)
-        print(f"\033[92mSent symmetric key for private message to {recipient}\033[0m")
-
-        # Encrypt the message content with the symmetric key
-        encrypted_message_content = encrypt_message(message, symmetric_key)
-        print(f"Encrypted message content: {encrypted_message_content}")
-
-        # Part 2: Send the actual message
+        # Send the encrypted message
         private_message = {
             'type': 'private_message_content',
             'sender': self.get_fullname(),
             'recipient': recipient,
-            'content': encrypted_message_content,
+            'content': encrypted_content,
             'timestamp': time.time()
         }
         self.add_to_blockchain(private_message)
         print(f"\033[92mSent private message content to {recipient}\033[0m")
+
+        # Update last private message sender
+        self.last_private_message_sender = recipient
 
 
     def handle_private_message(self, message):
@@ -365,8 +369,9 @@ class Node:
             })
             self.update_display()
             
-            # Remove the used symmetric key
-            del self.private_message_keys[sender]
+            # Store the sender of the last private message for quick replies
+            self.last_private_message_sender = sender
+
         except Exception as e:
             print(f"\033[91mError decrypting private message: {e}\033[0m")
             import traceback
@@ -384,24 +389,28 @@ class Node:
         encrypted_symmetric_key = message['symmetric_key']
         
         print(f"Received symmetric key for private message from {sender}")
-        print(f"Encrypted symmetric key: {encrypted_symmetric_key}")
 
-        # Decrypt the message-specific symmetric key
         try:
             # Base64 decode the encrypted symmetric key
             encrypted_symmetric_key_bytes = base64.b64decode(encrypted_symmetric_key)
             
             # Decrypt using recipient's private RSA key
             message_symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_symmetric_key_bytes)
-            print(f"Decrypted message symmetric key (hex): {message_symmetric_key.hex()}")
             
             # Store the decrypted message-specific symmetric key
             self.private_message_keys[sender] = message_symmetric_key
             print(f"Stored symmetric key for {sender}")
+            print(f"Current private_message_keys: {list(self.private_message_keys.keys())}")
         except Exception as e:
             print(f"Error decrypting message-specific symmetric key: {e}")
             import traceback
             traceback.print_exc()
+
+
+    def display_private_message_keys(self):
+        print("\nCurrent Private Message Keys:")
+        for sender, key in self.private_message_keys.items():
+            print(f"Sender: {sender}, Key: {key.hex()[:10]}...")
 
 
     def fix_base64_padding(self, base64_string):
@@ -442,14 +451,19 @@ class Node:
                 # Update the display
                 self.update_display()
 
-                # Optionally, remove the symmetric key after use
-                # del self.private_message_keys[sender]
+                # Store the sender of the last private message for quick replies
+                self.last_private_message_sender = sender
+
+                print(f"\033[92mDecrypted private message from {sender}: {decrypted_content}\033[0m")
             except Exception as e:
                 print(f"\033[91mError decrypting private message: {e}\033[0m")
                 import traceback
                 traceback.print_exc()
         else:
             print(f"No symmetric key found for private message from {sender}")
+
+        # Debug: Print the current state of private_message_keys
+        print(f"Current private_message_keys: {[k for k in self.private_message_keys.keys()]}")
 
 
 

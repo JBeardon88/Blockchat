@@ -38,7 +38,15 @@ def handle_command(command, node):
         else:
             _, recipient, message = parts
             node.send_private_message(recipient, message)
+    elif command.startswith('/r '):
+        if node.last_private_message_sender:
+            reply_content = command[3:].strip()
+            node.send_private_message(node.last_private_message_sender, reply_content)
+        else:
+            print("\033[91mNo previous private message to reply to.\033[0m")
     elif command == '/fullname':
         print(f"Full name: {node.get_fullname()}")
+    elif command == '/keys':
+        node.display_private_message_keys()
     else:
         print("\033[91mUnknown command. Type /help for a list of commands.\033[0m")
