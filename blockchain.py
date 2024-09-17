@@ -66,7 +66,7 @@ class Blockchain:
         return self.chain[-1]
 
     def add_block(self, block):
-        print(f"\033[94mAdding block with index: {block.index}\033[0m")
+        # print(f"\033[94mAdding block with index: {block.index}\033[0m")  # Removed
         if self.is_valid_new_block(block, self.chain[-1]):
             self.chain.append(block)
             return True

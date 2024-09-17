@@ -51,7 +51,6 @@ class Node:
         self.symmetric_key = None  # Generate a default symmetric key
         self.recipient_symmetric_keys = {}   # Dictionary to store keys for private messages
         self.private_message_keys = {}
-        print(f"Initialized private_message_keys: {self.private_message_keys}")
         self.last_private_message_sender = None
 
     def start(self):
@@ -111,9 +110,6 @@ class Node:
             }
         })
         send_to_peer(sock, handshake_message)
-        print(f"\033[92mInitiated handshake with {addr[0]}:{addr[1]}\033[0m")
-
-
 
     def handle_handshake(self, message, sock, addr):
         with self.handshake_lock:
@@ -135,14 +131,12 @@ class Node:
                     'type': 'symmetric_key',
                     'data': encoded_encrypted_symmetric_key  # Use Base64-encoded string
                 }))
-                print(f"\033[92mSent encrypted symmetric key to {addr[0]}:{addr[1]}\033[0m")
 
                 # Send blockchain or request it
                 self.send_blockchain(sock)
                 self.request_full_blockchain(sock)
 
     def handle_peer(self, sock, addr):
-        print(f"\033[94mHandling peer {addr}\033[0m")
         while self.running:
             message = receive_from_peer(sock)
             if message is None:
@@ -155,7 +149,6 @@ class Node:
         if not hasattr(self, 'public_keys'):
             self.public_keys = {}
         self.public_keys[username] = public_key
-        print(f"\033[92mAdded public key for user {username}\033[0m")
 
 
     def handle_regular_message(self, message):
@@ -165,12 +158,7 @@ class Node:
                 public_key = message.get('public_key')
                 print(f"\033[92mNew user registered: {username}\033[0m")
                 self.add_public_key(username, public_key)
-            else:
-                print(f"\033[93mReceived regular message: {json.dumps(message, indent=2)}\033[0m")
-        else:
-            print(f"\033[93mReceived regular message: {message}\033[0m")
-
-
+    
     def is_registered_user(self, username):
         for block in self.blockchain.chain:
             if isinstance(block.data, str):
@@ -232,9 +220,6 @@ class Node:
                 # Decrypting block data
                 decrypted_block_data = decrypt_message(block_data['data'], self.symmetric_key)
 
-                # Debug the decrypted data
-                print(f"DEBUG: Decrypted block data: {decrypted_block_data[:100]}")  # First 100 chars for debugging
-
                 # Checking the result of decryption
                 if not decrypted_block_data:
                     print(f"\033[91mError: Decrypted block data is None, possibly incorrect key or block format.\033[0m")
@@ -252,7 +237,7 @@ class Node:
                     elif parsed_block_data.get('type') == 'private_message_content':
                         self.handle_private_message_content(parsed_block_data)
                     else:
-                        print(f"\033[93mProcessing non-private message: {json.dumps(parsed_block_data, indent=2)}\033[0m")
+                        #print(f"\033[93mProcessing non-private message: {json.dumps(parsed_block_data, indent=2)}\033[0m")
                         self.handle_regular_message(parsed_block_data)
 
                 except json.JSONDecodeError:
@@ -468,14 +453,11 @@ class Node:
 
 
     def handle_symmetric_key(self, encoded_encrypted_key):
-        print(f"\033[93mEncrypted symmetric key received: {encoded_encrypted_key}\033[0m")  # Debugging log for incoming symmetric key
-
         # Base64 decode the encrypted symmetric key
         encrypted_key_bytes = base64.b64decode(encoded_encrypted_key)
 
         # Decrypt the symmetric key using our private RSA key
         self.symmetric_key = decrypt_key_with_rsa(self.private_key, encrypted_key_bytes)
-        print(f"\033[92mSymmetric key received and decrypted: {self.symmetric_key.hex()}\033[0m")
 
 
 
