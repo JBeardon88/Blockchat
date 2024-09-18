@@ -1,4 +1,5 @@
 
+
 import socket
 import threading
 import json
@@ -47,11 +48,15 @@ class Node:
 
         # Generate RSA key pair
         self.private_key, self.public_key = generate_rsa_key_pair()
-        # - it used to be this instead of the below - self.symmetric_key = None
         self.symmetric_key = None  # Generate a default symmetric key
         self.recipient_symmetric_keys = {}   # Dictionary to store keys for private messages
         self.private_message_keys = {}
+        self.decrypted_messages = {}  # Dictionary to store decrypted messages
         self.last_private_message_sender = None
+        print(f"Initialized private_message_keys: {self.private_message_keys}")
+
+
+    
 
     def start(self):
         self.server_thread.start()
@@ -318,6 +323,19 @@ class Node:
         self.add_to_blockchain(private_message)
         print(f"\033[92mSent private message content to {recipient}\033[0m")
 
+        # Add the decrypted message to chat history
+        self.chat_history.append({
+            'username': f"{self.get_fullname()} (Private)",
+            'content': message,
+            'timestamp': private_message['timestamp'],
+            'type': 'private_message_content',
+            'sender': self.get_fullname(),
+            'recipient': recipient
+        })
+
+        # Update the display
+        self.update_display()
+
         # Update last private message sender
         self.last_private_message_sender = recipient
 
@@ -403,9 +421,25 @@ class Node:
 
     def handle_private_message_content(self, message):
         sender = message['sender']
-        if sender in self.private_message_keys:
-            encrypted_content = message['content']
+        recipient = message['recipient']
+        encrypted_content = message['content']
+        timestamp = message['timestamp']
 
+        if recipient != self.get_fullname():
+            return  # This message is not for us
+
+        message_id = f"{sender}_{recipient}_{timestamp}"
+        
+        if message_id in self.decrypted_messages:
+            decrypted_content = self.decrypted_messages[message_id]
+            print(f"Using cached decrypted message for {message_id}")
+        else:
+            if sender not in self.private_message_keys:
+                print(f"Error: No symmetric key found for {sender}")
+                return
+
+            message_symmetric_key = self.private_message_keys[sender]
+            
             try:
                 # If encrypted_content is a string, decode it to bytes
                 if isinstance(encrypted_content, str):
@@ -426,26 +460,28 @@ class Node:
                 if isinstance(decrypted_content, bytes):
                     decrypted_content = decrypted_content.decode('utf-8')
 
-                # Add the decrypted message to chat history
-                self.chat_history.append({
-                    'username': f"{sender} (Private)",
-                    'content': decrypted_content,
-                    'timestamp': message['timestamp']
-                })
-
-                # Update the display
-                self.update_display()
-
-                # Store the sender of the last private message for quick replies
-                self.last_private_message_sender = sender
+                # Store the decrypted message
+                self.decrypted_messages[message_id] = decrypted_content
 
                 print(f"\033[92mDecrypted private message from {sender}: {decrypted_content}\033[0m")
             except Exception as e:
                 print(f"\033[91mError decrypting private message: {e}\033[0m")
                 import traceback
                 traceback.print_exc()
-        else:
-            print(f"No symmetric key found for private message from {sender}")
+
+        # Add the decrypted message to chat history if not already added
+        if not any(msg.get('timestamp') == timestamp and msg.get('sender') == sender for msg in self.chat_history):
+            self.chat_history.append({
+                'username': f"{sender} (Private)",
+                'content': decrypted_content,
+                'timestamp': timestamp
+            })
+
+        # Update the display
+        self.update_display()
+
+        # Store the sender of the last private message for quick replies
+        self.last_private_message_sender = sender
 
         # Debug: Print the current state of private_message_keys
         print(f"Current private_message_keys: {[k for k in self.private_message_keys.keys()]}")
@@ -693,7 +729,7 @@ class Node:
 
     def update_display(self):
         self.clear_console()
-        display_chat_history(self.chat_history, self.get_fullname())
+        display_chat_history(self.chat_history, self)  # Pass the Node object itself
         if self.blockchain.chain:
             display_latest_block(self.blockchain.get_latest_block(), self.symmetric_key)
 

@@ -1,6 +1,6 @@
 import time
 import json 
-from encryption import decrypt_message
+from encryption import decrypt_message, base64
 
 def display_help():
     print("\033[93mAvailable commands:\033[0m")
@@ -14,7 +14,7 @@ def display_help():
     print("/load - Load the blockchain and peer list from disk")
     print("/clear - Clear the console")
 
-def display_chat_history(chat_history, current_user):
+def display_chat_history(chat_history, node):
     print("\n\033[93m--- Chat History ---\033[0m")
     for msg in chat_history:
         if isinstance(msg, dict):
@@ -22,17 +22,31 @@ def display_chat_history(chat_history, current_user):
                 # Handle private message components
                 sender = msg.get('sender', 'Unknown')
                 recipient = msg.get('recipient', 'Unknown')
-                if recipient == current_user:
+                if recipient == node.get_fullname() or sender == node.get_fullname():
                     if msg['type'] == 'private_message_key':
                         print(f"\033[95m[Private Key] From {sender}\033[0m")
                     else:
                         content = msg.get('content', 'No content')
                         timestamp = msg.get('timestamp', time.time())
                         time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))
-                        print(f"\033[95m[{time_str}] {sender} (Private): {content}\033[0m")
-                else:
-                    # For non-recipients, just show a discreet notification
-                    print(f"\033[93m[Private message exchanged]\033[0m")
+
+                        # Decrypt the message if it's still encrypted and the user is the recipient
+                        if sender in node.private_message_keys and recipient == node.get_fullname():
+                            try:
+                                encrypted_content_bytes = base64.b64decode(content)
+                                message_symmetric_key = node.private_message_keys[sender]
+                                decrypted_content = decrypt_message(encrypted_content_bytes, message_symmetric_key)
+                                if isinstance(decrypted_content, bytes):
+                                    decrypted_content = decrypted_content.decode('utf-8')
+                                content = decrypted_content
+                            except Exception as e:
+                                print(f"\033[91mError decrypting message from {sender}: {e}\033[0m")
+                                import traceback
+                                traceback.print_exc()
+
+                        # Display the private message in lavender
+                        print(f"\033[38;5;183m[{time_str}] {sender} (Private): {content}\033[0m")
+                # Remove the "[private message exchanged]" message for non-involved users
             elif 'username' in msg and 'content' in msg:
                 # Handle regular chat messages
                 username = msg['username']
